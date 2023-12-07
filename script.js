@@ -1,14 +1,18 @@
 const gameBoard = document.getElementById("gameBoard");
 const boardSize = 25;
+const boardWidth = boardSize ** 2;
+const SNAKE_SEGMENT_SIZE = 20;
+
 let lastRenderTime = 0;
 let gameOver = false;
 let windowId;
 const gameStateKey = "snakeGameState";
 const activeWindowsKey = "activeWindows";
+let windowPositions = {};
 
 let snake = {
   bodyPosition: [{ x: 11, y: 11 }],
-  speed: 5,
+  speed: 10,
   direction: { x: 0, y: 0 },
 };
 
@@ -46,24 +50,17 @@ function checkAppleCollision(gameState) {
     gameState.snake[0].y === gameState.apple.y &&
     gameState.snakeWindow === gameState.appleWindow
   ) {
-    // Grow the snake by adding a new segment at the end
     gameState.snake.push({ ...gameState.snake[gameState.snake.length - 1] });
-
-    // Randomly reposition the apple on the board
     do {
       gameState.apple.x = Math.floor(Math.random() * boardSize) + 1;
       gameState.apple.y = Math.floor(Math.random() * boardSize) + 1;
     } while (isAppleOnSnake(gameState));
-
     let activeWindows =
       JSON.parse(localStorage.getItem(activeWindowsKey)) || [];
     if (activeWindows.length > 0) {
-      // Randomly select a window for the apple to appear next
       let randomWindowIndex = Math.floor(Math.random() * activeWindows.length);
       gameState.appleWindow = activeWindows[randomWindowIndex];
     }
-
-    // Save the updated gameState
     localStorage.setItem(gameStateKey, JSON.stringify(gameState));
   }
 }
@@ -80,40 +77,32 @@ function transitionSnakeToNextWindow(nextWindowId, gameState) {
 
 function update() {
   const gameState = JSON.parse(localStorage.getItem(gameStateKey));
-
+  if (gameOver) {
+    return;
+  }
   if (gameState && gameState.snakeWindow === windowId) {
     moveSnake(gameState);
-
-    let totalWindows = JSON.parse(
-      localStorage.getItem(activeWindowsKey)
-    ).length;
-
-    if (totalWindows === 1 || hasReachedYEdge(gameState.snake[0])) {
-      wrapSnake(gameState.snake);
-    } else if (hasReachedXEdge(gameState.snake[0])) {
-      const nextWindowId = determineNextWindowId();
-      if (nextWindowId !== windowId) {
-        transitionSnakeToNextWindow(nextWindowId, gameState);
-      }
-    }
-
     checkSelfCollision(gameState);
     checkAppleCollision(gameState);
+    let alignedWindowId;
 
+    if (hasReachedXEdge(gameState.snake[0])) {
+      alignedWindowId = findAlignedWindow("horizontal", gameState.snake[0]);
+
+      if (alignedWindowId === null) {
+        gameOver = true;
+        return;
+      }
+      transitionSnakeToNextWindow(alignedWindowId, gameState);
+    } else if (hasReachedYEdge(gameState.snake[0])) {
+      alignedWindowId = findAlignedWindow("vertical", gameState.snake[0]);
+      if (alignedWindowId === null) {
+        gameOver = true;
+        return;
+      }
+      transitionSnakeToNextWindow(alignedWindowId, gameState);
+    }
     localStorage.setItem(gameStateKey, JSON.stringify(gameState));
-  }
-}
-
-function wrapSnake(snake) {
-  if (snake[0].x > boardSize) {
-    snake[0].x = 1;
-  } else if (snake[0].x < 1) {
-    snake[0].x = boardSize;
-  }
-  if (snake[0].y > boardSize) {
-    snake[0].y = 1;
-  } else if (snake[0].y < 1) {
-    snake[0].y = boardSize;
   }
 }
 
@@ -128,6 +117,7 @@ function moveSnake(gameState) {
 function hasReachedXEdge(snakeHead) {
   return snakeHead.x <= 1 || snakeHead.x >= boardSize;
 }
+
 function hasReachedYEdge(snakeHead) {
   return snakeHead.y <= 1 || snakeHead.y >= boardSize;
 }
@@ -140,40 +130,16 @@ function generateWindowId() {
 
 function updateActiveWindowsList(windowId, action) {
   let windows = JSON.parse(localStorage.getItem(activeWindowsKey)) || [];
+  if (!Array.isArray(windows)) {
+    windows = [];
+  }
+
   if (action === "add") {
     windows.push(windowId);
   } else {
     windows = windows.filter((id) => id !== windowId);
   }
   localStorage.setItem(activeWindowsKey, JSON.stringify(windows));
-}
-
-function determineNextWindowId() {
-  const windows = JSON.parse(localStorage.getItem(activeWindowsKey)) || [];
-  const currentIndex = windows.indexOf(windowId);
-
-  if (currentIndex === -1 || windows.length === 1) {
-    // If the current window is not in the list or there's only one window,
-    // the snake should wrap around the current game board.
-    return windowId;
-  }
-
-  // Calculate next index based on the snake's direction
-  let nextIndex;
-  const gameState = JSON.parse(localStorage.getItem(gameStateKey));
-
-  if (gameState.direction.x > 0) {
-    // Moving right
-    nextIndex = (currentIndex + 1) % windows.length;
-  } else if (gameState.direction.x < 0) {
-    // Moving left
-    nextIndex = (currentIndex - 1 + windows.length) % windows.length;
-  } else {
-    // Modify here for vertical movement if needed
-    nextIndex = currentIndex;
-  }
-
-  return windows[nextIndex];
 }
 
 function isAppleOnSnake(gameState) {
@@ -199,33 +165,30 @@ function draw() {
   gameBoard.innerHTML = "";
   const gameState = JSON.parse(localStorage.getItem(gameStateKey));
 
-  if (!gameState) {
-    return;
-  }
-
-  if (gameState.snakeWindow === windowId) {
-    gameState.snake.forEach((segment, index) => {
-      const snakeElement = document.createElement("div");
-      snakeElement.style.gridColumnStart = segment.x;
-      snakeElement.style.gridRowStart = segment.y;
-      snakeElement.classList.add(index === 0 ? "snake-head" : "snake");
-      gameBoard.appendChild(snakeElement);
-    });
-  }
-
-  if (gameState.appleWindow === windowId) {
-    const appleElement = document.createElement("div");
-    appleElement.style.gridColumnStart = gameState.apple.x;
-    appleElement.style.gridRowStart = gameState.apple.y;
-    appleElement.classList.add("apple");
-    gameBoard.appendChild(appleElement);
+  if (gameState) {
+    if (gameState.snakeWindow === windowId) {
+      gameState.snake.forEach((segment, index) => {
+        const snakeElement = document.createElement("div");
+        snakeElement.style.gridColumnStart = segment.x;
+        snakeElement.style.gridRowStart = segment.y;
+        snakeElement.classList.add(index === 0 ? "snake-head" : "snake");
+        gameBoard.appendChild(snakeElement);
+      });
+    }
+    if (gameState.appleWindow === windowId) {
+      const appleElement = document.createElement("div");
+      appleElement.style.gridColumnStart = gameState.apple.x;
+      appleElement.style.gridRowStart = gameState.apple.y;
+      appleElement.classList.add("apple");
+      gameBoard.appendChild(appleElement);
+    }
   }
 }
 
 function initializeWindow() {
   windowId = generateWindowId();
   updateActiveWindowsList(windowId, "add");
-
+  reportWindowPosition();
   let gameState = JSON.parse(localStorage.getItem(gameStateKey));
   if (!gameState) {
     gameState = {
@@ -239,6 +202,90 @@ function initializeWindow() {
   }
 }
 
+function reportWindowPosition() {
+  const positionData = {
+    screenX: window.screenX,
+    screenY: window.screenY,
+    width: window.innerWidth,
+    height: window.innerHeight,
+  };
+
+  // Retrieve the existing positions
+  let allWindowPositions =
+    JSON.parse(localStorage.getItem("windowPositions")) || {};
+
+  const exists = Object.values(allWindowPositions).some(
+    (obj) =>
+      obj.screenX === positionData.screenX &&
+      obj.screenY === positionData.screenY &&
+      obj.width === positionData.width &&
+      obj.height === positionData.height
+  );
+
+  if (exists) {
+    return;
+  }
+
+  allWindowPositions[windowId] = positionData;
+
+  // Update the localStorage
+  localStorage.setItem("windowPositions", JSON.stringify(allWindowPositions));
+}
+
+function findAlignedWindow(orientation, snakeHead) {
+  const allWindowPositions =
+    JSON.parse(localStorage.getItem("windowPositions")) || {};
+  let alignedWindowId = null;
+
+  for (const [id, pos] of Object.entries(allWindowPositions)) {
+    if (id === windowId) {
+      continue;
+    }
+
+    if (
+      orientation === "horizontal" &&
+      (snakeHead.x === 1 || snakeHead.x === boardSize)
+    ) {
+      const verticalSnakePosition = snakeHead.y * SNAKE_SEGMENT_SIZE;
+      if (
+        window.screenY + verticalSnakePosition >=
+          pos.screenY + SNAKE_SEGMENT_SIZE &&
+        pos.screenY + window.innerHeight + SNAKE_SEGMENT_SIZE >=
+          window.screenY + verticalSnakePosition
+      ) {
+        alignedWindowId = id;
+        break;
+      }
+    } else if (
+      orientation === "vertical" &&
+      (snakeHead.y === 1 || snakeHead.y === boardSize)
+    ) {
+      const horizontalSnakePosition = snakeHead.x * SNAKE_SEGMENT_SIZE;
+      if (
+        window.screenX + horizontalSnakePosition >=
+          pos.screenX + SNAKE_SEGMENT_SIZE &&
+        pos.screenX + window.innerWidth + SNAKE_SEGMENT_SIZE >=
+          window.screenX + horizontalSnakePosition
+      ) {
+        alignedWindowId = id;
+        break;
+      }
+    }
+  }
+
+  return alignedWindowId;
+}
+
+// Call reportWindowPosition at regular intervals
+setInterval(() => {
+  const windowPositions = JSON.parse(localStorage.getItem("windowPositions"));
+
+  if (windowPositions) {
+    reportWindowPosition();
+  }
+}, 1000);
+
+// Initialize window
 document.addEventListener("DOMContentLoaded", () => {
   initializeWindow();
   window.requestAnimationFrame(main);
@@ -248,12 +295,15 @@ window.onunload = () => {
   updateActiveWindowsList(windowId, "remove");
 };
 
+window.addEventListener("beforeunload", function () {
+  localStorage.clear();
+});
+
 function main(currentTime) {
   if (gameOver) {
     if (confirm("You lost. Press OK to restart.")) {
-      localStorage.removeItem(gameStateKey);
-      window.location.reload();
       gameOver = false;
+      window.location.reload();
     }
     return;
   }
