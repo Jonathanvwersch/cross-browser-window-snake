@@ -1,13 +1,12 @@
 const gameBoard = document.getElementById("gameBoard");
-const boardSize = 25;
-const boardWidth = boardSize ** 2;
+const BOARD_SIZE = 25;
 const SNAKE_SEGMENT_SIZE = 20;
+const GAME_STATE_KEY = "snakeGameState";
+const WINDOW_POSITIONS_KEY = "windowPositions";
 
 let lastRenderTime = 0;
 let gameOver = false;
 let windowId;
-const gameStateKey = "snakeGameState";
-const activeWindowsKey = "activeWindows";
 let windowPositions = {};
 
 let snake = {
@@ -19,7 +18,7 @@ let snake = {
 let apple = { x: 5, y: 5 };
 
 window.addEventListener("keydown", (e) => {
-  const gameState = JSON.parse(localStorage.getItem(gameStateKey));
+  const gameState = JSON.parse(localStorage.getItem(GAME_STATE_KEY));
   if (!gameState || gameState.snakeWindow !== windowId) return;
 
   switch (e.key) {
@@ -41,7 +40,7 @@ window.addEventListener("keydown", (e) => {
       break;
   }
 
-  localStorage.setItem(gameStateKey, JSON.stringify(gameState));
+  localStorage.setItem(GAME_STATE_KEY, JSON.stringify(gameState));
 });
 
 function checkAppleCollision(gameState) {
@@ -50,33 +49,59 @@ function checkAppleCollision(gameState) {
     gameState.snake[0].y === gameState.apple.y &&
     gameState.snakeWindow === gameState.appleWindow
   ) {
+    // Extend the snake
     gameState.snake.push({ ...gameState.snake[gameState.snake.length - 1] });
+
+    // Randomize apple position in the current window
     do {
-      gameState.apple.x = Math.floor(Math.random() * boardSize) + 1;
-      gameState.apple.y = Math.floor(Math.random() * boardSize) + 1;
+      gameState.apple.x = Math.floor(Math.random() * BOARD_SIZE) + 1;
+      gameState.apple.y = Math.floor(Math.random() * BOARD_SIZE) + 1;
     } while (isAppleOnSnake(gameState));
-    let activeWindows =
-      JSON.parse(localStorage.getItem(activeWindowsKey)) || [];
-    if (activeWindows.length > 0) {
-      let randomWindowIndex = Math.floor(Math.random() * activeWindows.length);
-      gameState.appleWindow = activeWindows[randomWindowIndex];
+
+    // Get the list of active windows
+    let windows = JSON.parse(localStorage.getItem(WINDOW_POSITIONS_KEY)) || {};
+    const allWindows = Object.keys(windows);
+
+    if (allWindows.length > 0) {
+      // Choose a random window from the list
+      let randomWindowIndex = Math.floor(Math.random() * allWindows.length);
+      gameState.appleWindow = allWindows[randomWindowIndex];
     }
-    localStorage.setItem(gameStateKey, JSON.stringify(gameState));
+
+    // Save the updated game state
+    localStorage.setItem(GAME_STATE_KEY, JSON.stringify(gameState));
   }
 }
 
-function transitionSnakeToNextWindow(nextWindowId, gameState) {
+function transitionSnakeToNextWindow(
+  nextWindowId,
+  nextWindowScreenX,
+  nextWindowScreenY,
+  gameState
+) {
   gameState.snakeWindow = nextWindowId;
   if (gameState.direction.x !== 0) {
-    gameState.snake[0].x = gameState.direction.x > 0 ? 1 : boardSize;
+    gameState.snake[0].x = gameState.direction.x > 0 ? 1 : BOARD_SIZE;
+    gameState.snake[0].y = Math.floor(
+      (window.screenY +
+        gameState.snake[0].y * SNAKE_SEGMENT_SIZE -
+        nextWindowScreenY) /
+        SNAKE_SEGMENT_SIZE
+    );
   } else if (gameState.direction.y !== 0) {
-    gameState.snake[0].y = gameState.direction.y > 0 ? 1 : boardSize;
+    gameState.snake[0].y = gameState.direction.y > 0 ? 1 : BOARD_SIZE;
+    gameState.snake[0].x = Math.floor(
+      (window.screenX +
+        gameState.snake[0].x * SNAKE_SEGMENT_SIZE -
+        nextWindowScreenX) /
+        SNAKE_SEGMENT_SIZE
+    );
   }
-  localStorage.setItem(gameStateKey, JSON.stringify(gameState));
+  localStorage.setItem(GAME_STATE_KEY, JSON.stringify(gameState));
 }
 
 function update() {
-  const gameState = JSON.parse(localStorage.getItem(gameStateKey));
+  const gameState = JSON.parse(localStorage.getItem(GAME_STATE_KEY));
   if (gameOver) {
     return;
   }
@@ -84,25 +109,36 @@ function update() {
     moveSnake(gameState);
     checkSelfCollision(gameState);
     checkAppleCollision(gameState);
-    let alignedWindowId;
 
     if (hasReachedXEdge(gameState.snake[0])) {
-      alignedWindowId = findAlignedWindow("horizontal", gameState.snake[0]);
+      const { alignedWindowId, nextWindowScreenX, nextWindowScreenY } =
+        findAlignedWindow("horizontal", gameState.snake[0]);
 
       if (alignedWindowId === null) {
         gameOver = true;
         return;
       }
-      transitionSnakeToNextWindow(alignedWindowId, gameState);
+      transitionSnakeToNextWindow(
+        alignedWindowId,
+        nextWindowScreenX,
+        nextWindowScreenY,
+        gameState
+      );
     } else if (hasReachedYEdge(gameState.snake[0])) {
-      alignedWindowId = findAlignedWindow("vertical", gameState.snake[0]);
+      const { alignedWindowId, nextWindowScreenX, nextWindowScreenY } =
+        findAlignedWindow("vertical", gameState.snake[0]);
       if (alignedWindowId === null) {
         gameOver = true;
         return;
       }
-      transitionSnakeToNextWindow(alignedWindowId, gameState);
+      transitionSnakeToNextWindow(
+        alignedWindowId,
+        nextWindowScreenX,
+        nextWindowScreenY,
+        gameState
+      );
     }
-    localStorage.setItem(gameStateKey, JSON.stringify(gameState));
+    localStorage.setItem(GAME_STATE_KEY, JSON.stringify(gameState));
   }
 }
 
@@ -115,31 +151,17 @@ function moveSnake(gameState) {
 }
 
 function hasReachedXEdge(snakeHead) {
-  return snakeHead.x <= 1 || snakeHead.x >= boardSize;
+  return snakeHead.x <= 1 || snakeHead.x >= BOARD_SIZE;
 }
 
 function hasReachedYEdge(snakeHead) {
-  return snakeHead.y <= 1 || snakeHead.y >= boardSize;
+  return snakeHead.y <= 1 || snakeHead.y >= BOARD_SIZE;
 }
 
 function generateWindowId() {
   return `window-${new Date().getTime()}-${Math.random()
     .toString(16)
     .substring(2, 8)}`;
-}
-
-function updateActiveWindowsList(windowId, action) {
-  let windows = JSON.parse(localStorage.getItem(activeWindowsKey)) || [];
-  if (!Array.isArray(windows)) {
-    windows = [];
-  }
-
-  if (action === "add") {
-    windows.push(windowId);
-  } else {
-    windows = windows.filter((id) => id !== windowId);
-  }
-  localStorage.setItem(activeWindowsKey, JSON.stringify(windows));
 }
 
 function isAppleOnSnake(gameState) {
@@ -163,7 +185,7 @@ function checkSelfCollision(gameState) {
 
 function draw() {
   gameBoard.innerHTML = "";
-  const gameState = JSON.parse(localStorage.getItem(gameStateKey));
+  const gameState = JSON.parse(localStorage.getItem(GAME_STATE_KEY));
 
   if (gameState) {
     if (gameState.snakeWindow === windowId) {
@@ -187,9 +209,8 @@ function draw() {
 
 function initializeWindow() {
   windowId = generateWindowId();
-  updateActiveWindowsList(windowId, "add");
   reportWindowPosition();
-  let gameState = JSON.parse(localStorage.getItem(gameStateKey));
+  let gameState = JSON.parse(localStorage.getItem(GAME_STATE_KEY));
   if (!gameState) {
     gameState = {
       snakeWindow: windowId,
@@ -198,7 +219,7 @@ function initializeWindow() {
       apple: apple,
       direction: snake.direction,
     };
-    localStorage.setItem(gameStateKey, JSON.stringify(gameState));
+    localStorage.setItem(GAME_STATE_KEY, JSON.stringify(gameState));
   }
 }
 
@@ -236,6 +257,8 @@ function findAlignedWindow(orientation, snakeHead) {
   const allWindowPositions =
     JSON.parse(localStorage.getItem("windowPositions")) || {};
   let alignedWindowId = null;
+  let nextWindowScreenX = null;
+  let nextWindowScreenY = null;
 
   for (const [id, pos] of Object.entries(allWindowPositions)) {
     if (id === windowId) {
@@ -244,7 +267,7 @@ function findAlignedWindow(orientation, snakeHead) {
 
     if (
       orientation === "horizontal" &&
-      (snakeHead.x === 1 || snakeHead.x === boardSize)
+      (snakeHead.x === 1 || snakeHead.x === BOARD_SIZE)
     ) {
       const verticalSnakePosition = snakeHead.y * SNAKE_SEGMENT_SIZE;
       if (
@@ -254,11 +277,13 @@ function findAlignedWindow(orientation, snakeHead) {
           window.screenY + verticalSnakePosition
       ) {
         alignedWindowId = id;
+        nextWindowScreenX = pos.screenX;
+        nextWindowScreenY = pos.screenY;
         break;
       }
     } else if (
       orientation === "vertical" &&
-      (snakeHead.y === 1 || snakeHead.y === boardSize)
+      (snakeHead.y === 1 || snakeHead.y === BOARD_SIZE)
     ) {
       const horizontalSnakePosition = snakeHead.x * SNAKE_SEGMENT_SIZE;
       if (
@@ -268,12 +293,14 @@ function findAlignedWindow(orientation, snakeHead) {
           window.screenX + horizontalSnakePosition
       ) {
         alignedWindowId = id;
+        nextWindowScreenX = pos.screenX;
+        nextWindowScreenY = pos.screenY;
         break;
       }
     }
   }
 
-  return alignedWindowId;
+  return { alignedWindowId, nextWindowScreenX, nextWindowScreenY };
 }
 
 // Call reportWindowPosition at regular intervals
@@ -283,17 +310,13 @@ setInterval(() => {
   if (windowPositions) {
     reportWindowPosition();
   }
-}, 1000);
+}, 100);
 
 // Initialize window
 document.addEventListener("DOMContentLoaded", () => {
   initializeWindow();
   window.requestAnimationFrame(main);
 });
-
-window.onunload = () => {
-  updateActiveWindowsList(windowId, "remove");
-};
 
 window.addEventListener("beforeunload", function () {
   localStorage.clear();
